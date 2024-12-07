@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: crazy-chat-server
+    env: node
+    buildCommand: cd server && npm install
+    startCommand: cd server && node server.js
+    envVars:
+      - key: PORT
+        value: 10000
+
+  - type: web
+    name: crazy-chat-client
+    env: static
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
