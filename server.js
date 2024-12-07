@@ -31,6 +31,8 @@ const waitingUsers = new Map();
 
 function findMatch(user) {
   for (const [waitingUserId, waitingUser] of waitingUsers) {
+    if (waitingUserId === user.socketId) continue; // Skip self-matching
+    
     // Check if genders match preferences
     const userPrefsMatch = waitingUser.preferences.gender.includes(user.gender);
     const waitingUserPrefsMatch = user.preferences.gender.includes(waitingUser.gender);
@@ -43,23 +45,40 @@ function findMatch(user) {
   return null;
 }
 
+function logActiveUsers() {
+  console.log('\nActive Users:');
+  activeUsers.forEach((user, socketId) => {
+    console.log(`${socketId}: ${user.name} (${user.gender})`);
+  });
+  
+  console.log('\nWaiting Users:');
+  waitingUsers.forEach((user, socketId) => {
+    console.log(`${socketId}: ${user.name} (${user.gender})`);
+  });
+}
+
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
 
   socket.on('register', (userData) => {
+    console.log('User registering:', userData.name);
     const user = { ...userData, socketId: socket.id };
     activeUsers.set(socket.id, user);
 
     // Try to find a match
     const match = findMatch(user);
     if (match) {
+      console.log(`Match found: ${user.name} <-> ${match.name}`);
       // Notify both users about the match
       io.to(socket.id).emit('matched', match);
       io.to(match.socketId).emit('matched', user);
     } else {
+      console.log(`No match found for ${user.name}, adding to waiting list`);
       // Add to waiting list
       waitingUsers.set(socket.id, user);
     }
+
+    logActiveUsers();
   });
 
   // WebRTC Signaling
@@ -86,13 +105,16 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', () => {
+    console.log('User disconnected:', socket.id);
     const user = activeUsers.get(socket.id);
     if (user) {
+      console.log(`${user.name} disconnected`);
       activeUsers.delete(socket.id);
       waitingUsers.delete(socket.id);
       // Notify partner if exists
       io.emit('userDisconnected', socket.id);
     }
+    logActiveUsers();
   });
 });
 
