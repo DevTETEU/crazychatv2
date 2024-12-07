@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useStore } from '../store/useStore';
 import { User } from '../types';
 import { UserCircle2 } from 'lucide-react';
+import { initializeSocket } from '../services/socket';
 
 export const UserProfile: React.FC = () => {
   const setUser = useStore((state) => state.setUser);
@@ -20,6 +21,7 @@ export const UserProfile: React.FC = () => {
       ...formData,
     };
     setUser(user);
+    initializeSocket(user); // Initialize socket connection after user registration
   };
 
   return (
