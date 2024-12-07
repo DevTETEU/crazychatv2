@@ -9,6 +9,11 @@ const configuration = {
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
     { urls: 'stun:stun2.l.google.com:19302' },
+    {
+      urls: 'turn:numb.viagenie.ca',
+      username: 'webrtc@live.com',
+      credential: 'muazkh'
+    }
   ]
 };
 
@@ -22,107 +27,115 @@ export const VideoChat: React.FC = () => {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isVideoEnabled, setIsVideoEnabled] = useState(true);
   const [isAudioEnabled, setIsAudioEnabled] = useState(true);
+  const [isConnecting, setIsConnecting] = useState(true);
 
   useEffect(() => {
-    const initializeMedia = async () => {
+    const setupWebRTC = async () => {
       try {
+        // Create new RTCPeerConnection
+        peerConnection.current = new RTCPeerConnection(configuration);
+
+        // Get local media stream
         const stream = await navigator.mediaDevices.getUserMedia({
           video: true,
           audio: true
         });
         localStream.current = stream;
+
+        // Display local stream
         if (localVideoRef.current) {
           localVideoRef.current.srcObject = stream;
         }
-        initializePeerConnection();
+
+        // Add tracks to peer connection
+        stream.getTracks().forEach(track => {
+          peerConnection.current?.addTrack(track, stream);
+        });
+
+        // Handle incoming stream
+        peerConnection.current.ontrack = (event) => {
+          console.log('Received remote stream');
+          if (remoteVideoRef.current && event.streams[0]) {
+            remoteVideoRef.current.srcObject = event.streams[0];
+          }
+        };
+
+        // ICE candidate handling
+        peerConnection.current.onicecandidate = (event) => {
+          if (event.candidate && currentPartner) {
+            console.log('Sending ICE candidate');
+            socket.emit('ice-candidate', {
+              candidate: event.candidate,
+              to: currentPartner.socketId
+            });
+          }
+        };
+
+        // Connection state changes
+        peerConnection.current.onconnectionstatechange = () => {
+          console.log('Connection state:', peerConnection.current?.connectionState);
+          if (peerConnection.current?.connectionState === 'connected') {
+            setIsConnecting(false);
+          }
+        };
+
+        // Create and send offer if we have a partner
+        if (currentPartner) {
+          console.log('Creating offer for:', currentPartner.name);
+          const offer = await peerConnection.current.createOffer({
+            offerToReceiveAudio: true,
+            offerToReceiveVideo: true
+          });
+          await peerConnection.current.setLocalDescription(offer);
+          socket.emit('offer', {
+            offer,
+            to: currentPartner.socketId
+          });
+        }
       } catch (error) {
-        console.error('Error accessing media devices:', error);
+        console.error('Error setting up WebRTC:', error);
       }
     };
 
-    initializeMedia();
+    setupWebRTC();
 
     return () => {
+      // Cleanup
       localStream.current?.getTracks().forEach(track => track.stop());
       peerConnection.current?.close();
     };
-  }, []);
-
-  const initializePeerConnection = () => {
-    peerConnection.current = new RTCPeerConnection(configuration);
-
-    // Add local stream
-    if (localStream.current) {
-      localStream.current.getTracks().forEach(track => {
-        peerConnection.current?.addTrack(track, localStream.current!);
-      });
-    }
-
-    // Handle incoming stream
-    peerConnection.current.ontrack = (event) => {
-      if (remoteVideoRef.current) {
-        remoteVideoRef.current.srcObject = event.streams[0];
-      }
-    };
-
-    // Handle ICE candidates
-    peerConnection.current.onicecandidate = (event) => {
-      if (event.candidate && currentPartner) {
-        socket.emit('ice-candidate', {
-          candidate: event.candidate,
-          to: currentPartner.socketId
-        });
-      }
-    };
-
-    if (currentPartner) {
-      createOffer();
-    }
-  };
-
-  const createOffer = async () => {
-    try {
-      const offer = await peerConnection.current?.createOffer();
-      await peerConnection.current?.setLocalDescription(offer);
-      
-      if (currentPartner && offer) {
-        socket.emit('offer', {
-          offer,
-          to: currentPartner.socketId
-        });
-      }
-    } catch (error) {
-      console.error('Error creating offer:', error);
-    }
-  };
+  }, [currentPartner]);
 
   useEffect(() => {
+    // Handle incoming WebRTC signaling
     socket.on('offer', async ({ offer, from }) => {
+      console.log('Received offer from:', from);
       try {
-        await peerConnection.current?.setRemoteDescription(new RTCSessionDescription(offer));
-        const answer = await peerConnection.current?.createAnswer();
-        await peerConnection.current?.setLocalDescription(answer);
-        
-        socket.emit('answer', {
-          answer,
-          to: from
-        });
+        if (!peerConnection.current) return;
+        await peerConnection.current.setRemoteDescription(new RTCSessionDescription(offer));
+        const answer = await peerConnection.current.createAnswer();
+        await peerConnection.current.setLocalDescription(answer);
+        socket.emit('answer', { answer, to: from });
       } catch (error) {
         console.error('Error handling offer:', error);
       }
     });
 
     socket.on('answer', async ({ answer }) => {
+      console.log('Received answer');
       try {
-        await peerConnection.current?.setRemoteDescription(new RTCSessionDescription(answer));
+        if (!peerConnection.current) return;
+        await peerConnection.current.setRemoteDescription(new RTCSessionDescription(answer));
       } catch (error) {
         console.error('Error handling answer:', error);
       }
     });
 
     socket.on('ice-candidate', async ({ candidate }) => {
+      console.log('Received ICE candidate');
       try {
-        await peerConnection.current?.addIceCandidate(new RTCIceCandidate(candidate));
+        if (!peerConnection.current) return;
+        await peerConnection.current.addIceCandidate(new RTCIceCandidate(candidate));
       } catch (error) {
         console.error('Error adding ICE candidate:', error);
       }
@@ -163,6 +176,11 @@ export const VideoChat: React.FC = () => {
 
   return (
     <div className="relative w-full aspect-video bg-gray-900 rounded-lg overflow-hidden">
+      {isConnecting && (
+        <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-10">
+          <div className="text-white text-lg">Connecting to partner...</div>
+        </div>
+      )}
       <video
         ref={remoteVideoRef}
         autoPlay
