@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useStore } from '../store/useStore';
 import { MessageSquare, Send, Video, Mic, UserCircle2 } from 'lucide-react';
 import { VideoChat } from './VideoChat';
+import { socket } from '../services/socket';
 import clsx from 'clsx';
 
 export const ChatInterface: React.FC = () => {
@@ -11,22 +12,30 @@ export const ChatInterface: React.FC = () => {
 
   const sendMessage = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!message.trim()) return;
+    if (!message.trim() || !currentPartner) return;
 
-    addMessage({
+    const newMessage = {
       id: Math.random().toString(36).substr(2, 9),
       senderId: user!.id,
       content: message,
       timestamp: Date.now(),
+    };
+
+    // Add message locally
+    addMessage(newMessage);
+
+    // Send message to server
+    socket.emit('message', {
+      to: currentPartner.socketId,
+      message: message
     });
+
     setMessage('');
   };
 
   return (
     <div className="min-h-screen bg-black flex">
-      {/* Chat container */}
       <div className="flex-1 flex flex-col max-w-6xl mx-auto p-4">
-        {/* Header */}
         <div className="bg-yellow-400 p-4 rounded-t-lg flex items-center justify-between">
           <div className="flex items-center space-x-3">
             <UserCircle2 className="w-10 h-10" />
@@ -46,16 +55,11 @@ export const ChatInterface: React.FC = () => {
             >
               <Video className="w-6 h-6" />
             </button>
-            <button className="p-2 hover:bg-yellow-500 rounded-full">
-              <Mic className="w-6 h-6" />
-            </button>
           </div>
         </div>
 
-        {/* Video Chat */}
         {showVideo && <VideoChat />}
 
-        {/* Messages */}
         <div className="flex-1 bg-gray-900 p-4 overflow-y-auto space-y-4">
           {messages.map((msg) => (
             <div
@@ -72,7 +76,6 @@ export const ChatInterface: React.FC = () => {
           ))}
         </div>
 
-        {/* Message input */}
         <form
           onSubmit={sendMessage}
           className="bg-yellow-400 p-4 rounded-b-lg flex items-center space-x-4"
