@@ -1,47 +1,139 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Video, VideoOff, Mic, MicOff, Maximize2, Minimize2 } from 'lucide-react';
-import { webRTCService } from '../services/webrtc';
+import { socket } from '../services/socket';
 import { useStore } from '../store/useStore';
 import clsx from 'clsx';
+
+const configuration = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
+  ]
+};
 
 export const VideoChat: React.FC = () => {
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
+  const peerConnection = useRef<RTCPeerConnection | null>(null);
+  const localStream = useRef<MediaStream | null>(null);
+  const currentPartner = useStore((state) => state.currentPartner);
+  
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isVideoEnabled, setIsVideoEnabled] = useState(true);
   const [isAudioEnabled, setIsAudioEnabled] = useState(true);
-  const currentPartner = useStore((state) => state.currentPartner);
 
   useEffect(() => {
-    const initializeVideo = async () => {
+    const initializeMedia = async () => {
       try {
-        const stream = await webRTCService.startLocalStream();
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: true
+        });
+        localStream.current = stream;
         if (localVideoRef.current) {
           localVideoRef.current.srcObject = stream;
         }
+        initializePeerConnection();
       } catch (error) {
-        console.error('Error starting video:', error);
+        console.error('Error accessing media devices:', error);
       }
     };
 
-    initializeVideo();
+    initializeMedia();
 
-    webRTCService.onStream((stream, socketId) => {
+    return () => {
+      localStream.current?.getTracks().forEach(track => track.stop());
+      peerConnection.current?.close();
+    };
+  }, []);
+
+  const initializePeerConnection = () => {
+    peerConnection.current = new RTCPeerConnection(configuration);
+
+    // Add local stream
+    if (localStream.current) {
+      localStream.current.getTracks().forEach(track => {
+        peerConnection.current?.addTrack(track, localStream.current!);
+      });
+    }
+
+    // Handle incoming stream
+    peerConnection.current.ontrack = (event) => {
       if (remoteVideoRef.current) {
-        remoteVideoRef.current.srcObject = stream;
+        remoteVideoRef.current.srcObject = event.streams[0];
+      }
+    };
+
+    // Handle ICE candidates
+    peerConnection.current.onicecandidate = (event) => {
+      if (event.candidate && currentPartner) {
+        socket.emit('ice-candidate', {
+          candidate: event.candidate,
+          to: currentPartner.socketId
+        });
+      }
+    };
+
+    if (currentPartner) {
+      createOffer();
+    }
+  };
+
+  const createOffer = async () => {
+    try {
+      const offer = await peerConnection.current?.createOffer();
+      await peerConnection.current?.setLocalDescription(offer);
+      
+      if (currentPartner && offer) {
+        socket.emit('offer', {
+          offer,
+          to: currentPartner.socketId
+        });
+      }
+    } catch (error) {
+      console.error('Error creating offer:', error);
+    }
+  };
+
+  useEffect(() => {
+    socket.on('offer', async ({ offer, from }) => {
+      try {
+        await peerConnection.current?.setRemoteDescription(new RTCSessionDescription(offer));
+        const answer = await peerConnection.current?.createAnswer();
+        await peerConnection.current?.setLocalDescription(answer);
+        
+        socket.emit('answer', {
+          answer,
+          to: from
+        });
+      } catch (error) {
+        console.error('Error handling offer:', error);
+      }
+    });
+
+    socket.on('answer', async ({ answer }) => {
+      try {
+        await peerConnection.current?.setRemoteDescription(new RTCSessionDescription(answer));
+      } catch (error) {
+        console.error('Error handling answer:', error);
+      }
+    });
+
+    socket.on('ice-candidate', async ({ candidate }) => {
+      try {
+        await peerConnection.current?.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch (error) {
+        console.error('Error adding ICE candidate:', error);
       }
     });
 
     return () => {
-      webRTCService.closeAllConnections();
+      socket.off('offer');
+      socket.off('answer');
+      socket.off('ice-candidate');
     };
   }, []);
-
-  useEffect(() => {
-    if (currentPartner?.socketId) {
-      webRTCService.initiateCall(currentPartner.socketId);
-    }
-  }, [currentPartner]);
 
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
@@ -53,21 +145,19 @@ export const VideoChat: React.FC = () => {
     }
   };
 
-  const toggleVideo = async () => {
-    const newState = !isVideoEnabled;
-    setIsVideoEnabled(newState);
-    const stream = await webRTCService.startLocalStream(newState, isAudioEnabled);
-    if (localVideoRef.current) {
-      localVideoRef.current.srcObject = stream;
+  const toggleVideo = () => {
+    if (localStream.current) {
+      const videoTrack = localStream.current.getVideoTracks()[0];
+      videoTrack.enabled = !isVideoEnabled;
+      setIsVideoEnabled(!isVideoEnabled);
     }
   };
 
-  const toggleAudio = async () => {
-    const newState = !isAudioEnabled;
-    setIsAudioEnabled(newState);
-    const stream = await webRTCService.startLocalStream(isVideoEnabled, newState);
-    if (localVideoRef.current) {
-      localVideoRef.current.srcObject = stream;
+  const toggleAudio = () => {
+    if (localStream.current) {
+      const audioTrack = localStream.current.getAudioTracks()[0];
+      audioTrack.enabled = !isAudioEnabled;
+      setIsAudioEnabled(!isAudioEnabled);
     }
   };
 
