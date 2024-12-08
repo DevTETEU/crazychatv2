@@ -6,7 +6,7 @@ const SOCKET_URL = import.meta.env.PROD
   : 'http://localhost:3000';
 
 export const socket = io(SOCKET_URL, {
-  autoConnect: false,
+  autoConnect: true, // Changed to true to connect immediately
   reconnection: true,
   reconnectionAttempts: 5,
   reconnectionDelay: 1000,
@@ -30,6 +30,7 @@ socket.on('connect', () => {
 socket.on('connect_error', (error) => {
   console.log('Connection error:', error);
   useStore.getState().setIsConnected(false);
+  useStore.getState().setActiveUsersCount(0); // Reset count on connection error
   
   // Attempt to reconnect after a delay
   clearTimeout(reconnectTimer);
@@ -44,6 +45,7 @@ socket.on('disconnect', () => {
   console.log('Disconnected from server');
   useStore.getState().setIsConnected(false);
   useStore.getState().setCurrentPartner(null);
+  useStore.getState().setActiveUsersCount(0); // Reset count on disconnect
 });
 
 socket.on('matched', (partner) => {
@@ -69,9 +71,6 @@ socket.on('activeUsers', (count) => {
 });
 
 export const initializeSocket = (user) => {
-  if (!socket.connected) {
-    socket.connect();
-  }
   socket.emit('register', user);
 };
 
