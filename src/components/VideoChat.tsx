@@ -22,6 +22,8 @@ export const VideoChat: React.FC = () => {
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const peerConnection = useRef<RTCPeerConnection | null>(null);
   const localStream = useRef<MediaStream | null>(null);
+  const audioTrackRef = useRef<MediaStreamTrack | null>(null);
+  const videoTrackRef = useRef<MediaStreamTrack | null>(null);
   const currentPartner = useStore((state) => state.currentPartner);
   
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -42,6 +44,15 @@ export const VideoChat: React.FC = () => {
         });
         localStream.current = stream;
 
+        // Store audio and video tracks references
+        audioTrackRef.current = stream.getAudioTracks()[0];
+        videoTrackRef.current = stream.getVideoTracks()[0];
+
+        // Enable audio by default
+        if (audioTrackRef.current) {
+          audioTrackRef.current.enabled = true;
+        }
+
         // Display local stream
         if (localVideoRef.current) {
           localVideoRef.current.srcObject = stream;
@@ -49,7 +60,9 @@ export const VideoChat: React.FC = () => {
 
         // Add tracks to peer connection
         stream.getTracks().forEach(track => {
-          peerConnection.current?.addTrack(track, stream);
+          if (peerConnection.current) {
+            peerConnection.current.addTrack(track, stream);
+          }
         });
 
         // Handle incoming stream
@@ -101,8 +114,12 @@ export const VideoChat: React.FC = () => {
 
     return () => {
       // Cleanup
-      localStream.current?.getTracks().forEach(track => track.stop());
-      peerConnection.current?.close();
+      if (localStream.current) {
+        localStream.current.getTracks().forEach(track => track.stop());
+      }
+      if (peerConnection.current) {
+        peerConnection.current.close();
+      }
     };
   }, [currentPartner]);
 
@@ -159,17 +176,15 @@ export const VideoChat: React.FC = () => {
   };
 
   const toggleVideo = () => {
-    if (localStream.current) {
-      const videoTrack = localStream.current.getVideoTracks()[0];
-      videoTrack.enabled = !isVideoEnabled;
+    if (videoTrackRef.current) {
+      videoTrackRef.current.enabled = !isVideoEnabled;
       setIsVideoEnabled(!isVideoEnabled);
     }
   };
 
   const toggleAudio = () => {
-    if (localStream.current) {
-      const audioTrack = localStream.current.getAudioTracks()[0];
-      audioTrack.enabled = !isAudioEnabled;
+    if (audioTrackRef.current) {
+      audioTrackRef.current.enabled = !isAudioEnabled;
       setIsAudioEnabled(!isAudioEnabled);
     }
   };
