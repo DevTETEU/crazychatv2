@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { useStore } from '../store/useStore';
-import { MessageSquare, Send, Video, Mic, UserCircle2 } from 'lucide-react';
+import { MessageSquare, Send, Video, Mic, UserCircle2, Search } from 'lucide-react';
 import { VideoChat } from './VideoChat';
-import { socket } from '../services/socket';
+import { socket, startNewSearch } from '../services/socket';
 import clsx from 'clsx';
 
 export const ChatInterface: React.FC = () => {
@@ -21,16 +21,16 @@ export const ChatInterface: React.FC = () => {
       timestamp: Date.now(),
     };
 
-    // Add message locally
     addMessage(newMessage);
-
-    // Send message to server
     socket.emit('message', {
       to: currentPartner.socketId,
       message: message
     });
-
     setMessage('');
+  };
+
+  const handleNewSearch = () => {
+    startNewSearch();
   };
 
   return (
@@ -49,6 +49,13 @@ export const ChatInterface: React.FC = () => {
             </div>
           </div>
           <div className="flex space-x-4">
+            <button 
+              onClick={handleNewSearch}
+              className="flex items-center space-x-2 bg-black text-yellow-400 px-4 py-2 rounded-full hover:bg-gray-800 transition-colors"
+            >
+              <Search className="w-5 h-5" />
+              <span>New Search</span>
+            </button>
             <button 
               onClick={() => setShowVideo(!showVideo)}
               className="p-2 hover:bg-yellow-500 rounded-full"
