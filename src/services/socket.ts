@@ -46,9 +46,22 @@ socket.on('userDisconnected', (userId) => {
   }
 });
 
+socket.on('activeUsers', (count) => {
+  useStore.getState().setActiveUsersCount(count);
+});
+
 export const initializeSocket = (user) => {
   if (!socket.connected) {
     socket.connect();
   }
   socket.emit('register', user);
+};
+
+export const startNewSearch = () => {
+  const store = useStore.getState();
+  if (store.currentPartner) {
+    socket.emit('leaveChat', store.currentPartner.socketId);
+  }
+  store.startNewSearch();
+  socket.emit('findNewPartner');
 };
