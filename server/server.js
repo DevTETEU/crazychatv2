@@ -26,6 +26,8 @@ const io = new Server(server, {
   pingInterval: 5000
 });
 
+// Store connected sockets for accurate user count
+const connectedSockets = new Set();
 // Store active users and their socket connections
 const activeUsers = new Map();
 // Store users waiting for matches
@@ -33,8 +35,8 @@ const waitingUsers = new Map();
 // Store active chat pairs to prevent multiple connections
 const activePairs = new Map();
 
-function getActiveUsersCount() {
-  return activeUsers.size;
+function getConnectedUsersCount() {
+  return connectedSockets.size;
 }
 
 function isUserInChat(socketId) {
@@ -84,25 +86,31 @@ function removeFromChat(socketId) {
 }
 
 function broadcastActiveUsers() {
-  const count = getActiveUsersCount();
+  const count = getConnectedUsersCount();
   io.emit('activeUsers', count);
+  console.log('Broadcasting active users count:', count);
 }
 
-// Periodic cleanup
+// Periodic cleanup and broadcast
 setInterval(() => {
-  for (const [socketId, user] of activeUsers) {
+  // Clean up disconnected sockets
+  for (const socketId of connectedSockets) {
     if (!io.sockets.sockets.get(socketId)) {
-      console.log('Cleaning up disconnected user:', socketId);
+      console.log('Cleaning up disconnected socket:', socketId);
+      connectedSockets.delete(socketId);
       activeUsers.delete(socketId);
       waitingUsers.delete(socketId);
       removeFromChat(socketId);
     }
   }
   broadcastActiveUsers();
-}, 30000);
+}, 10000); // Reduced interval to 10 seconds for more frequent updates
 
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
+  
+  // Add to connected sockets immediately
+  connectedSockets.add(socket.id);
   broadcastActiveUsers();
 
   socket.on('register', (userData) => {
@@ -114,6 +122,7 @@ io.on('connection', (socket) => {
     };
     
     activeUsers.set(socket.id, user);
+    broadcastActiveUsers(); // Broadcast after registration
     
     // Only try to match if user isn't already in a chat
     if (!isUserInChat(socket.id)) {
@@ -190,6 +199,7 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', () => {
     console.log('User disconnected:', socket.id);
+    connectedSockets.delete(socket.id);
     const partnerId = removeFromChat(socket.id);
     if (partnerId) {
       io.to(partnerId).emit('userDisconnected', socket.id);
