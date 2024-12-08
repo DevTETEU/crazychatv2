@@ -10,17 +10,34 @@ export const socket = io(SOCKET_URL, {
   reconnection: true,
   reconnectionAttempts: 5,
   reconnectionDelay: 1000,
+  timeout: 10000
 });
+
+let reconnectTimer: number;
 
 socket.on('connect', () => {
   console.log('Connected to server');
   useStore.getState().setIsConnected(true);
+  clearTimeout(reconnectTimer);
   
   // Re-register user if exists
   const user = useStore.getState().user;
   if (user) {
     socket.emit('register', user);
   }
+});
+
+socket.on('connect_error', (error) => {
+  console.log('Connection error:', error);
+  useStore.getState().setIsConnected(false);
+  
+  // Attempt to reconnect after a delay
+  clearTimeout(reconnectTimer);
+  reconnectTimer = window.setTimeout(() => {
+    if (!socket.connected) {
+      socket.connect();
+    }
+  }, 2000);
 });
 
 socket.on('disconnect', () => {
@@ -47,6 +64,7 @@ socket.on('userDisconnected', (userId) => {
 });
 
 socket.on('activeUsers', (count) => {
+  console.log('Active users updated:', count);
   useStore.getState().setActiveUsersCount(count);
 });
 
