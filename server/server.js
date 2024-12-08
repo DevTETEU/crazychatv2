@@ -31,7 +31,8 @@ const waitingUsers = new Map();
 
 function findMatch(user) {
   for (const [waitingUserId, waitingUser] of waitingUsers) {
-    // Check if genders match preferences
+    if (waitingUserId === user.socketId) continue;
+    
     const userPrefsMatch = waitingUser.preferences.gender.includes(user.gender);
     const waitingUserPrefsMatch = user.preferences.gender.includes(waitingUser.gender);
 
@@ -43,23 +44,45 @@ function findMatch(user) {
   return null;
 }
 
+function broadcastActiveUsers() {
+  io.emit('activeUsers', activeUsers.size);
+}
+
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
 
   socket.on('register', (userData) => {
+    console.log('User registering:', userData.name);
     const user = { ...userData, socketId: socket.id };
     activeUsers.set(socket.id, user);
+    broadcastActiveUsers();
 
-    // Try to find a match
     const match = findMatch(user);
     if (match) {
-      // Notify both users about the match
+      console.log(`Match found: ${user.name} <-> ${match.name}`);
       io.to(socket.id).emit('matched', match);
       io.to(match.socketId).emit('matched', user);
     } else {
-      // Add to waiting list
+      console.log(`No match found for ${user.name}, adding to waiting list`);
       waitingUsers.set(socket.id, user);
     }
+  });
+
+  socket.on('findNewPartner', () => {
+    const user = activeUsers.get(socket.id);
+    if (user) {
+      const match = findMatch(user);
+      if (match) {
+        io.to(socket.id).emit('matched', match);
+        io.to(match.socketId).emit('matched', user);
+      } else {
+        waitingUsers.set(socket.id, user);
+      }
+    }
+  });
+
+  socket.on('leaveChat', (partnerId) => {
+    io.to(partnerId).emit('userDisconnected', socket.id);
   });
 
   // WebRTC Signaling
@@ -86,13 +109,11 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', () => {
-    const user = activeUsers.get(socket.id);
-    if (user) {
-      activeUsers.delete(socket.id);
-      waitingUsers.delete(socket.id);
-      // Notify partner if exists
-      io.emit('userDisconnected', socket.id);
-    }
+    console.log('User disconnected:', socket.id);
+    activeUsers.delete(socket.id);
+    waitingUsers.delete(socket.id);
+    broadcastActiveUsers();
+    io.emit('userDisconnected', socket.id);
   });
 });
 
