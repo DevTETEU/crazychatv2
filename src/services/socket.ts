@@ -12,15 +12,13 @@ export const socket = io(SOCKET_URL, {
   reconnectionDelay: 1000,
 });
 
-let reconnectTimer: NodeJS.Timeout | null = null;
-
 socket.on('connect', () => {
   console.log('Connected to server');
   useStore.getState().setIsConnected(true);
   
   const user = useStore.getState().user;
   if (user) {
-    socket.emit('register', { ...user, socketId: socket.id });
+    socket.emit('register', user);
   }
 });
 
@@ -28,31 +26,15 @@ socket.on('disconnect', () => {
   console.log('Disconnected from server');
   useStore.getState().setIsConnected(false);
   useStore.getState().setCurrentPartner(null);
-  useStore.getState().clearChat();
-
-  if (reconnectTimer) {
-    clearTimeout(reconnectTimer);
-  }
-  
-  reconnectTimer = setTimeout(() => {
-    const user = useStore.getState().user;
-    if (user && !socket.connected) {
-      socket.connect();
-    }
-  }, 2000);
 });
 
 socket.on('matched', (partner) => {
   console.log('Matched with partner:', partner);
   useStore.getState().setCurrentPartner(partner);
-  useStore.getState().clearChat();
 });
 
 socket.on('message', (message) => {
-  const currentPartner = useStore.getState().currentPartner;
-  if (currentPartner && message.senderId === currentPartner.socketId) {
-    useStore.getState().addMessage(message);
-  }
+  useStore.getState().addMessage(message);
 });
 
 socket.on('userDisconnected', (userId) => {
@@ -64,19 +46,17 @@ socket.on('userDisconnected', (userId) => {
 });
 
 export const initializeSocket = (user) => {
-  useStore.getState().clearChat();
   if (!socket.connected) {
     socket.connect();
   }
-  socket.emit('register', { ...user, socketId: socket.id });
+  socket.emit('register', user);
 };
 
 export const searchNewPartner = () => {
   const user = useStore.getState().user;
   if (user) {
-    socket.emit('leave_chat');
     useStore.getState().clearChat();
     useStore.getState().setCurrentPartner(null);
-    socket.emit('register', { ...user, socketId: socket.id });
+    socket.emit('register', user);
   }
 };
