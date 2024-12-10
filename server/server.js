@@ -74,6 +74,14 @@ io.on('connection', (socket) => {
     const user = { ...userData, socketId: socket.id };
     activeUsers.set(socket.id, user);
     
+    // Remove user from any existing matches
+    if (activeMatches.has(socket.id)) {
+      const oldPartnerId = activeMatches.get(socket.id);
+      activeMatches.delete(socket.id);
+      activeMatches.delete(oldPartnerId);
+      io.to(oldPartnerId).emit('userDisconnected', socket.id);
+    }
+    
     const match = findMatch(user);
     if (match) {
       console.log(`Match found: ${user.name} <-> ${match.name}`);
