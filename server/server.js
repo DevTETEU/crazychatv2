@@ -24,25 +24,20 @@ const io = new Server(server, {
   }
 });
 
-// Store active users and their socket connections
 const activeUsers = new Map();
-// Store users waiting for matches
 const waitingUsers = new Map();
-// Store active matches
 const activeMatches = new Map();
 
 function findMatch(user) {
-  for (const [waitingUserId, waitingUser] of waitingUsers) {
-    if (waitingUserId === user.socketId) continue; // Skip self-matching
-    if (activeMatches.has(waitingUserId)) continue; // Skip users already in a match
+  for (const [waitingUserId, waitingUser] of waitingUsers.entries()) {
+    if (waitingUserId === user.socketId) continue;
+    if (activeMatches.has(waitingUserId)) continue;
     
-    // Check if genders match preferences
     const userPrefsMatch = waitingUser.preferences.gender.includes(user.gender);
     const waitingUserPrefsMatch = user.preferences.gender.includes(waitingUser.gender);
 
     if (userPrefsMatch && waitingUserPrefsMatch) {
       waitingUsers.delete(waitingUserId);
-      // Record the match
       activeMatches.set(user.socketId, waitingUserId);
       activeMatches.set(waitingUserId, user.socketId);
       return waitingUser;
@@ -52,49 +47,51 @@ function findMatch(user) {
 }
 
 function cleanupUser(socketId) {
-  // Remove from active users
-  activeUsers.delete(socketId);
-  
-  // Remove from waiting users
-  waitingUsers.delete(socketId);
-  
-  // Handle active matches
   if (activeMatches.has(socketId)) {
     const partnerId = activeMatches.get(socketId);
-    // Remove both users from matches
     activeMatches.delete(socketId);
     activeMatches.delete(partnerId);
-    // Notify partner
     io.to(partnerId).emit('userDisconnected', socketId);
   }
+  
+  activeUsers.delete(socketId);
+  waitingUsers.delete(socketId);
+}
+
+function logState() {
+  console.log('\nCurrent State:');
+  console.log('Active Users:', Array.from(activeUsers.keys()));
+  console.log('Waiting Users:', Array.from(waitingUsers.keys()));
+  console.log('Active Matches:', Array.from(activeMatches.entries()));
 }
 
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
 
   socket.on('register', (userData) => {
-    // Clean up any existing matches for this user
     cleanupUser(socket.id);
     
-    console.log('User registering:', userData.name);
     const user = { ...userData, socketId: socket.id };
     activeUsers.set(socket.id, user);
-
-    // Try to find a match
+    
     const match = findMatch(user);
     if (match) {
       console.log(`Match found: ${user.name} <-> ${match.name}`);
-      // Notify both users about the match
       io.to(socket.id).emit('matched', match);
       io.to(match.socketId).emit('matched', user);
     } else {
       console.log(`No match found for ${user.name}, adding to waiting list`);
-      // Add to waiting list
       waitingUsers.set(socket.id, user);
     }
+    
+    logState();
   });
 
-  // WebRTC Signaling
+  socket.on('leave_chat', () => {
+    cleanupUser(socket.id);
+    logState();
+  });
+
   socket.on('offer', ({ offer, to }) => {
     if (activeMatches.get(socket.id) === to) {
       socket.to(to).emit('offer', { offer, from: socket.id });
@@ -115,7 +112,6 @@ io.on('connection', (socket) => {
 
   socket.on('message', (data) => {
     const { to, message } = data;
-    // Only send message if users are matched
     if (activeMatches.get(socket.id) === to) {
       io.to(to).emit('message', {
         id: uuidv4(),
@@ -129,6 +125,7 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     console.log('User disconnected:', socket.id);
     cleanupUser(socket.id);
+    logState();
   });
 });
 
