@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useStore } from '../store/useStore';
 import { MessageSquare, Send, Video, UserCircle2 } from 'lucide-react';
 import { VideoChat } from './VideoChat';
@@ -9,12 +9,6 @@ export const ChatInterface: React.FC = () => {
   const [message, setMessage] = useState('');
   const [showVideo, setShowVideo] = useState(false);
   const { user, currentPartner, messages, addMessage } = useStore();
-
-  useEffect(() => {
-    if (!currentPartner) {
-      setShowVideo(false);
-    }
-  }, [currentPartner]);
 
   const sendMessage = (e: React.FormEvent) => {
     e.preventDefault();
