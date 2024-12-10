@@ -12,14 +12,15 @@ export const socket = io(SOCKET_URL, {
   reconnectionDelay: 1000,
 });
 
+let reconnectTimer: NodeJS.Timeout | null = null;
+
 socket.on('connect', () => {
   console.log('Connected to server');
   useStore.getState().setIsConnected(true);
   
-  // Re-register user if exists
   const user = useStore.getState().user;
   if (user) {
-    socket.emit('register', user);
+    socket.emit('register', { ...user, socketId: socket.id });
   }
 });
 
@@ -28,6 +29,17 @@ socket.on('disconnect', () => {
   useStore.getState().setIsConnected(false);
   useStore.getState().setCurrentPartner(null);
   useStore.getState().clearChat();
+
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+  }
+  
+  reconnectTimer = setTimeout(() => {
+    const user = useStore.getState().user;
+    if (user && !socket.connected) {
+      socket.connect();
+    }
+  }, 2000);
 });
 
 socket.on('matched', (partner) => {
@@ -56,7 +68,7 @@ export const initializeSocket = (user) => {
   if (!socket.connected) {
     socket.connect();
   }
-  socket.emit('register', user);
+  socket.emit('register', { ...user, socketId: socket.id });
 };
 
 export const searchNewPartner = () => {
@@ -65,6 +77,6 @@ export const searchNewPartner = () => {
     socket.emit('leave_chat');
     useStore.getState().clearChat();
     useStore.getState().setCurrentPartner(null);
-    socket.emit('register', user);
+    socket.emit('register', { ...user, socketId: socket.id });
   }
 };
