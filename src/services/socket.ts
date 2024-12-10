@@ -6,19 +6,15 @@ const SOCKET_URL = import.meta.env.PROD
   : 'http://localhost:3000';
 
 export const socket = io(SOCKET_URL, {
-  autoConnect: true, // Changed to true to connect immediately
+  autoConnect: false,
   reconnection: true,
   reconnectionAttempts: 5,
   reconnectionDelay: 1000,
-  timeout: 10000
 });
-
-let reconnectTimer: number;
 
 socket.on('connect', () => {
   console.log('Connected to server');
   useStore.getState().setIsConnected(true);
-  clearTimeout(reconnectTimer);
   
   // Re-register user if exists
   const user = useStore.getState().user;
@@ -27,34 +23,25 @@ socket.on('connect', () => {
   }
 });
 
-socket.on('connect_error', (error) => {
-  console.log('Connection error:', error);
-  useStore.getState().setIsConnected(false);
-  useStore.getState().setActiveUsersCount(0); // Reset count on connection error
-  
-  // Attempt to reconnect after a delay
-  clearTimeout(reconnectTimer);
-  reconnectTimer = window.setTimeout(() => {
-    if (!socket.connected) {
-      socket.connect();
-    }
-  }, 2000);
-});
-
 socket.on('disconnect', () => {
   console.log('Disconnected from server');
   useStore.getState().setIsConnected(false);
   useStore.getState().setCurrentPartner(null);
-  useStore.getState().setActiveUsersCount(0); // Reset count on disconnect
+  useStore.getState().clearChat();
 });
 
 socket.on('matched', (partner) => {
   console.log('Matched with partner:', partner);
   useStore.getState().setCurrentPartner(partner);
+  useStore.getState().clearChat(); // Clear previous chat when new match is found
 });
 
 socket.on('message', (message) => {
-  useStore.getState().addMessage(message);
+  const currentPartner = useStore.getState().currentPartner;
+  // Only accept messages if we have a current partner and the message is from them
+  if (currentPartner && message.senderId === currentPartner.socketId) {
+    useStore.getState().addMessage(message);
+  }
 });
 
 socket.on('userDisconnected', (userId) => {
@@ -62,23 +49,27 @@ socket.on('userDisconnected', (userId) => {
   if (currentPartner?.socketId === userId) {
     useStore.getState().setCurrentPartner(null);
     useStore.getState().clearChat();
+    // Re-register to find new partner
+    const user = useStore.getState().user;
+    if (user) {
+      socket.emit('register', user);
+    }
   }
-});
-
-socket.on('activeUsers', (count) => {
-  console.log('Active users updated:', count);
-  useStore.getState().setActiveUsersCount(count);
 });
 
 export const initializeSocket = (user) => {
+  useStore.getState().clearChat(); // Clear any existing chat
+  if (!socket.connected) {
+    socket.connect();
+  }
   socket.emit('register', user);
 };
 
-export const startNewSearch = () => {
-  const store = useStore.getState();
-  if (store.currentPartner) {
-    socket.emit('leaveChat', store.currentPartner.socketId);
+export const searchNewPartner = () => {
+  const user = useStore.getState().user;
+  if (user) {
+    useStore.getState().clearChat();
+    useStore.getState().setCurrentPartner(null);
+    socket.emit('register', user);
   }
-  store.startNewSearch();
-  socket.emit('findNewPartner');
 };
