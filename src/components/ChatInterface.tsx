@@ -10,6 +10,12 @@ export const ChatInterface: React.FC = () => {
   const [showVideo, setShowVideo] = useState(false);
   const { user, currentPartner, messages, addMessage } = useStore();
 
+  useEffect(() => {
+    if (!currentPartner) {
+      setShowVideo(false);
+    }
+  }, [currentPartner]);
+
   const sendMessage = (e: React.FormEvent) => {
     e.preventDefault();
     if (!message.trim() || !currentPartner) return;
