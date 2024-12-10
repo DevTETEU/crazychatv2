@@ -21,10 +21,8 @@ export const ChatInterface: React.FC = () => {
       timestamp: Date.now(),
     };
 
-    // Add message locally
     addMessage(newMessage);
 
-    // Send message to server
     socket.emit('message', {
       to: currentPartner.socketId,
       message: message
@@ -105,7 +103,7 @@ export const ChatInterface: React.FC = () => {
           />
           <button
             type="submit"
-            className="bg-black text-yellow-400 p-2 rounded-full hover:bg-gray-800"
+            className="bg-black text-yellow-400 p-2 rounded-full hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
             disabled={!currentPartner}
           >
             <Send className="w-6 h-6" />
