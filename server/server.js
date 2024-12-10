@@ -21,173 +21,102 @@ const io = new Server(server, {
       : 'http://localhost:5173',
     methods: ['GET', 'POST'],
     credentials: true
-  },
-  pingTimeout: 10000,
-  pingInterval: 5000
+  }
 });
 
-// Store connected sockets for accurate user count
-const connectedSockets = new Set();
 // Store active users and their socket connections
 const activeUsers = new Map();
 // Store users waiting for matches
 const waitingUsers = new Map();
-// Store active chat pairs to prevent multiple connections
-const activePairs = new Map();
-
-function getConnectedUsersCount() {
-  return connectedSockets.size;
-}
-
-function isUserInChat(socketId) {
-  return activePairs.has(socketId) || Array.from(activePairs.values()).includes(socketId);
-}
+// Store active matches
+const activeMatches = new Map();
 
 function findMatch(user) {
   for (const [waitingUserId, waitingUser] of waitingUsers) {
-    // Skip if either user is already in a chat
-    if (isUserInChat(waitingUserId) || isUserInChat(user.socketId)) {
-      continue;
-    }
-    
-    // Skip self-matching
-    if (waitingUserId === user.socketId) continue;
+    if (waitingUserId === user.socketId) continue; // Skip self-matching
+    if (activeMatches.has(waitingUserId)) continue; // Skip users already in a match
     
     // Check if genders match preferences
     const userPrefsMatch = waitingUser.preferences.gender.includes(user.gender);
     const waitingUserPrefsMatch = user.preferences.gender.includes(waitingUser.gender);
 
     if (userPrefsMatch && waitingUserPrefsMatch) {
-      // Create chat pair
-      activePairs.set(user.socketId, waitingUserId);
       waitingUsers.delete(waitingUserId);
+      // Record the match
+      activeMatches.set(user.socketId, waitingUserId);
+      activeMatches.set(waitingUserId, user.socketId);
       return waitingUser;
     }
   }
   return null;
 }
 
-function removeFromChat(socketId) {
-  // Remove from active pairs
-  if (activePairs.has(socketId)) {
-    const partnerId = activePairs.get(socketId);
-    activePairs.delete(socketId);
-    return partnerId;
-  }
+function cleanupUser(socketId) {
+  // Remove from active users
+  activeUsers.delete(socketId);
   
-  // Check if user is a partner in any pair
-  for (const [userId, partnerId] of activePairs) {
-    if (partnerId === socketId) {
-      activePairs.delete(userId);
-      return userId;
-    }
+  // Remove from waiting users
+  waitingUsers.delete(socketId);
+  
+  // Handle active matches
+  if (activeMatches.has(socketId)) {
+    const partnerId = activeMatches.get(socketId);
+    // Remove both users from matches
+    activeMatches.delete(socketId);
+    activeMatches.delete(partnerId);
+    // Notify partner
+    io.to(partnerId).emit('userDisconnected', socketId);
   }
-  return null;
 }
-
-function broadcastActiveUsers() {
-  const count = getConnectedUsersCount();
-  io.emit('activeUsers', count);
-  console.log('Broadcasting active users count:', count);
-}
-
-// Periodic cleanup and broadcast
-setInterval(() => {
-  // Clean up disconnected sockets
-  for (const socketId of connectedSockets) {
-    if (!io.sockets.sockets.get(socketId)) {
-      console.log('Cleaning up disconnected socket:', socketId);
-      connectedSockets.delete(socketId);
-      activeUsers.delete(socketId);
-      waitingUsers.delete(socketId);
-      removeFromChat(socketId);
-    }
-  }
-  broadcastActiveUsers();
-}, 10000); // Reduced interval to 10 seconds for more frequent updates
 
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
-  
-  // Add to connected sockets immediately
-  connectedSockets.add(socket.id);
-  broadcastActiveUsers();
 
   socket.on('register', (userData) => {
+    // Clean up any existing matches for this user
+    cleanupUser(socket.id);
+    
     console.log('User registering:', userData.name);
-    const user = { 
-      ...userData, 
-      socketId: socket.id,
-      joinedAt: Date.now()
-    };
-    
+    const user = { ...userData, socketId: socket.id };
     activeUsers.set(socket.id, user);
-    broadcastActiveUsers(); // Broadcast after registration
-    
-    // Only try to match if user isn't already in a chat
-    if (!isUserInChat(socket.id)) {
-      const match = findMatch(user);
-      if (match) {
-        console.log(`Match found: ${user.name} <-> ${match.name}`);
-        io.to(socket.id).emit('matched', match);
-        io.to(match.socketId).emit('matched', user);
-      } else {
-        console.log(`No match found for ${user.name}, adding to waiting list`);
-        waitingUsers.set(socket.id, user);
-      }
+
+    // Try to find a match
+    const match = findMatch(user);
+    if (match) {
+      console.log(`Match found: ${user.name} <-> ${match.name}`);
+      // Notify both users about the match
+      io.to(socket.id).emit('matched', match);
+      io.to(match.socketId).emit('matched', user);
+    } else {
+      console.log(`No match found for ${user.name}, adding to waiting list`);
+      // Add to waiting list
+      waitingUsers.set(socket.id, user);
     }
   });
 
-  socket.on('findNewPartner', () => {
-    const user = activeUsers.get(socket.id);
-    if (user) {
-      // Remove from current chat if any
-      const oldPartnerId = removeFromChat(socket.id);
-      if (oldPartnerId) {
-        io.to(oldPartnerId).emit('userDisconnected', socket.id);
-      }
-      
-      // Try to find new match
-      const match = findMatch(user);
-      if (match) {
-        io.to(socket.id).emit('matched', match);
-        io.to(match.socketId).emit('matched', user);
-      } else {
-        waitingUsers.set(socket.id, user);
-      }
-    }
-  });
-
-  socket.on('leaveChat', (partnerId) => {
-    removeFromChat(socket.id);
-    io.to(partnerId).emit('userDisconnected', socket.id);
-  });
-
+  // WebRTC Signaling
   socket.on('offer', ({ offer, to }) => {
-    // Only send offer if users are paired
-    if (activePairs.get(socket.id) === to || activePairs.get(to) === socket.id) {
+    if (activeMatches.get(socket.id) === to) {
       socket.to(to).emit('offer', { offer, from: socket.id });
     }
   });
 
   socket.on('answer', ({ answer, to }) => {
-    // Only send answer if users are paired
-    if (activePairs.get(socket.id) === to || activePairs.get(to) === socket.id) {
+    if (activeMatches.get(socket.id) === to) {
       socket.to(to).emit('answer', { answer, from: socket.id });
     }
   });
 
   socket.on('ice-candidate', ({ candidate, to }) => {
-    // Only send ICE candidates if users are paired
-    if (activePairs.get(socket.id) === to || activePairs.get(to) === socket.id) {
+    if (activeMatches.get(socket.id) === to) {
       socket.to(to).emit('ice-candidate', { candidate, from: socket.id });
     }
   });
 
   socket.on('message', (data) => {
     const { to, message } = data;
-    // Only send messages if users are paired
-    if (activePairs.get(socket.id) === to || activePairs.get(to) === socket.id) {
+    // Only send message if users are matched
+    if (activeMatches.get(socket.id) === to) {
       io.to(to).emit('message', {
         id: uuidv4(),
         senderId: socket.id,
@@ -199,14 +128,7 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', () => {
     console.log('User disconnected:', socket.id);
-    connectedSockets.delete(socket.id);
-    const partnerId = removeFromChat(socket.id);
-    if (partnerId) {
-      io.to(partnerId).emit('userDisconnected', socket.id);
-    }
-    activeUsers.delete(socket.id);
-    waitingUsers.delete(socket.id);
-    broadcastActiveUsers();
+    cleanupUser(socket.id);
   });
 });
 
